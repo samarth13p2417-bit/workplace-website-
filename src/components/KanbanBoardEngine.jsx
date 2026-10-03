@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import {
   Plus,
   Search,
@@ -511,6 +511,14 @@ export const KanbanBoardEngine = ({
                                 <p className="text-[13px] font-medium text-[#172B4D] group-hover:text-[#0052CC] leading-snug">
                                   {card.title}
                                 </p>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteCard(card.id, e)}
+                                  title="Delete card"
+                                  className="opacity-0 group-hover:opacity-100 p-1 text-[#6B778C] hover:text-[#DE350B] rounded hover:bg-[#FFEBE6] transition-opacity cursor-pointer shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               </div>
 
                               {card.dueDate && (

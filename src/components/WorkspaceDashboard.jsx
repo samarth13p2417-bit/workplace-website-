@@ -61,6 +61,7 @@ export const WorkspaceDashboard = ({ user, onLogout }) => {
   const [statusNotification, setStatusNotification] = useState('');
   const [selectedTask, setSelectedTask] = useState(null);
   const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
+  const [boardRefreshKey, setBoardRefreshKey] = useState(0);
 
   const userInitials = user?.name
     ? user.name
@@ -132,7 +133,10 @@ export const WorkspaceDashboard = ({ user, onLogout }) => {
         {/* Right Action Tools */}
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => setAddingToCol('todo')}
+            onClick={() => {
+              setActiveTab('Board');
+              showNotification('Switched to Board view. Click "+ Create issue" on any column to add a card.');
+            }}
             className="px-3 py-1 bg-[#0052CC] hover:bg-[#0065FF] text-white text-xs font-semibold rounded-[3px] flex items-center gap-1 shadow-xs cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -596,6 +600,7 @@ export const WorkspaceDashboard = ({ user, onLogout }) => {
             />
           ) : activeTab === 'Board' ? (
             <KanbanBoardEngine
+              key={boardRefreshKey}
               workspace={{ name: teamName, key: 'KAN' }}
               user={user}
               onSelectCard={(card) => setSelectedTask(card)}
@@ -667,8 +672,15 @@ export const WorkspaceDashboard = ({ user, onLogout }) => {
             initials: userInitials,
           }}
           onClose={() => setSelectedTask(null)}
-          onUpdateTask={(taskId, updates) => {
+          onUpdateTask={async (taskId, updates) => {
             setSelectedTask((prev) => (prev ? { ...prev, ...updates } : null));
+            try {
+              await kanbanApi.updateCard(taskId, updates);
+              setBoardRefreshKey((prev) => prev + 1);
+            } catch (err) {
+              console.error('Failed to persist task update:', err);
+              if (showNotification) showNotification('Failed to save task update');
+            }
           }}
           showNotification={showNotification}
         />

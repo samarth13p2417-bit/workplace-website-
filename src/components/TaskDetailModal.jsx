@@ -96,10 +96,12 @@ export const TaskDetailModal = ({
   const reporterInitials = currentUser?.initials || (reporterName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'SC');
 
   const handleAssignToMe = () => {
-    setAssignee({
+    const updatedAssignee = {
       name: reporterName,
       initials: reporterInitials,
-    });
+    };
+    setAssignee(updatedAssignee);
+    if (onUpdateTask) onUpdateTask(task.id, { assignedTo: updatedAssignee });
     if (showNotification) showNotification(`Task assigned to ${reporterName}`);
   };
 
@@ -285,7 +287,11 @@ export const TaskDetailModal = ({
                   />
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setIsEditingTitle(false)}
+                      onClick={() => {
+                        setIsEditingTitle(false);
+                        if (onUpdateTask) onUpdateTask(task.id, { title: taskTitle });
+                        if (showNotification) showNotification('Task title updated');
+                      }}
                       className="px-2.5 py-1 bg-[#0052CC] text-white text-xs font-semibold rounded hover:bg-[#0065FF] cursor-pointer"
                     >
                       Save
@@ -349,7 +355,11 @@ export const TaskDetailModal = ({
                   />
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setIsEditingDesc(false)}
+                      onClick={() => {
+                        setIsEditingDesc(false);
+                        if (onUpdateTask) onUpdateTask(task.id, { description });
+                        if (showNotification) showNotification('Task description updated');
+                      }}
                       className="px-3 py-1 bg-[#0052CC] text-white text-xs font-semibold rounded hover:bg-[#0065FF] cursor-pointer"
                     >
                       Save
@@ -754,6 +764,8 @@ export const TaskDetailModal = ({
                               onClick={() => {
                                 setPriority(p);
                                 setShowPriorityDropdown(false);
+                                if (onUpdateTask) onUpdateTask(task.id, { priority: p });
+                                if (showNotification) showNotification(`Priority set to ${p}`);
                               }}
                               className="w-full text-left px-3 py-1 hover:bg-[#FAFBFC]"
                             >
