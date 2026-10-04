@@ -1,0 +1,284 @@
+import User from '../models/User.js';
+import Workspace from '../models/Workspace.js';
+import Board from '../models/Board.js';
+import List from '../models/List.js';
+import Card from '../models/Card.js';
+
+export const seedDatabaseIfEmpty = async () => {
+  try {
+    const workspaceCount = await Workspace.countDocuments();
+    if (workspaceCount > 0) {
+      return; // Database already seeded
+    }
+
+    console.log('[Seed] Database is empty. Seeding initial Jira workspace data...');
+
+    // 1. Initial User
+    const initialUser = {
+      id: 'usr_samarth_1',
+      name: 'Samarth Choudhary',
+      email: 'samarth.choudhary@softwareteam.com',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
+      role: 'Software Engineer',
+      workTypeTitle: 'Software Development',
+      initials: 'SC',
+      provider: 'email',
+    };
+    await User.create(initialUser);
+
+    // 2. Initial Workspace
+    const initialWorkspace = {
+      id: 'ws_software_team',
+      name: 'My Software Team',
+      key: 'KAN',
+      category: 'Software',
+      type: 'Team-managed',
+      description: 'Core engineering workspace for agile delivery and CI/CD development tracking.',
+      plan: 'Standard',
+      ownerId: 'usr_samarth_1',
+      members: [
+        {
+          id: 'mem_1',
+          name: 'Samarth Choudhary',
+          email: 'samarth.choudhary@softwareteam.com',
+          role: 'Admin',
+          initials: 'SC',
+          avatarColor: '#FF8B00',
+          status: 'Active',
+        },
+        {
+          id: 'mem_2',
+          name: 'Shrutika',
+          email: 'shrutika@softwareteam.com',
+          role: 'Member',
+          initials: 'SH',
+          avatarColor: '#0052CC',
+          status: 'Active',
+        },
+        {
+          id: 'mem_3',
+          name: 'Alex Morgan',
+          email: 'alex.m@softwareteam.com',
+          role: 'Member',
+          initials: 'AM',
+          avatarColor: '#36B37E',
+          status: 'Active',
+        },
+        {
+          id: 'mem_4',
+          name: 'David Kim',
+          email: 'david.k@softwareteam.com',
+          role: 'Viewer',
+          initials: 'DK',
+          avatarColor: '#6554C0',
+          status: 'Invited',
+        },
+      ],
+    };
+    await Workspace.create(initialWorkspace);
+
+    // 3. Initial Board
+    const initialBoard = {
+      id: 'board_kanban_1',
+      workspaceId: 'ws_software_team',
+      name: 'Software Kanban Board',
+      type: 'kanban',
+      filter: 'all',
+    };
+    await Board.create(initialBoard);
+
+    // 4. Initial Lists
+    const initialLists = [
+      {
+        id: 'list_todo',
+        boardId: 'board_kanban_1',
+        title: 'To Do',
+        order: 0,
+        cardIds: ['KAN-1', 'KAN-3'],
+      },
+      {
+        id: 'list_in_progress',
+        boardId: 'board_kanban_1',
+        title: 'In Progress',
+        order: 1,
+        cardIds: ['KAN-2'],
+      },
+      {
+        id: 'list_in_review',
+        boardId: 'board_kanban_1',
+        title: 'In Review',
+        order: 2,
+        cardIds: ['KAN-4'],
+      },
+      {
+        id: 'list_done',
+        boardId: 'board_kanban_1',
+        title: 'Done',
+        order: 3,
+        cardIds: ['KAN-5'],
+      },
+    ];
+    await List.insertMany(initialLists);
+
+    // 5. Initial Cards
+    const initialCards = [
+      {
+        id: 'KAN-1',
+        listId: 'list_todo',
+        key: 'KAN-1',
+        title: 'Task 1',
+        description: '',
+        status: 'To Do',
+        iconType: 'check',
+        dueDate: 'Oct 7, 2026',
+        startDate: '',
+        priority: 'None',
+        parent: '',
+        team: '',
+        labels: [],
+        assignedTo: null,
+        reporter: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+          email: 'samarth.choudhary@softwareteam.com',
+        },
+        subtasks: [
+          { id: 1, title: 'Draft API specification and schema', done: false },
+          { id: 2, title: 'Configure unit test pipeline', done: true },
+        ],
+        attachments: [],
+        comments: [
+          {
+            id: 1,
+            author: 'Samarth Choudhary',
+            initials: 'SC',
+            time: '1 hour ago',
+            text: 'Created task and scoped requirements for initial delivery.',
+          },
+        ],
+        watchers: 1,
+        order: 0,
+      },
+      {
+        id: 'KAN-2',
+        listId: 'list_in_progress',
+        key: 'KAN-2',
+        title: 'Task 2',
+        description: 'Configure sprint boards and link CI/CD repositories.',
+        status: 'In Progress',
+        iconType: 'story',
+        dueDate: 'Oct 12, 2026',
+        startDate: 'Oct 1, 2026',
+        priority: 'Medium',
+        parent: 'Core Features',
+        team: 'Engineering',
+        labels: ['frontend', 'auth'],
+        assignedTo: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+        },
+        reporter: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+        },
+        subtasks: [
+          { id: 1, title: 'Implement drag and drop handlers', done: true },
+          { id: 2, title: 'Optimistic local UI rollback on error', done: false },
+        ],
+        attachments: [],
+        comments: [],
+        watchers: 2,
+        order: 0,
+      },
+      {
+        id: 'KAN-3',
+        listId: 'list_todo',
+        key: 'KAN-3',
+        title: 'Setup GitHub Actions CI/CD Deployment',
+        description: 'Automate container building and staging deployment on merge.',
+        status: 'To Do',
+        iconType: 'check',
+        dueDate: 'Oct 15, 2026',
+        startDate: '',
+        priority: 'High',
+        parent: 'DevOps',
+        team: 'Infrastructure',
+        labels: ['ci-cd', 'devops'],
+        assignedTo: null,
+        reporter: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+        },
+        subtasks: [],
+        attachments: [],
+        comments: [],
+        watchers: 1,
+        order: 1,
+      },
+      {
+        id: 'KAN-4',
+        listId: 'list_in_review',
+        key: 'KAN-4',
+        title: 'Implement OAuth Chooser & SSO Security',
+        description: 'Provide seamless Google and Microsoft single sign-on flows.',
+        status: 'In Review',
+        iconType: 'story',
+        dueDate: 'Oct 8, 2026',
+        startDate: 'Sep 28, 2026',
+        priority: 'High',
+        parent: 'Security',
+        team: 'Engineering',
+        labels: ['security', 'oauth'],
+        assignedTo: {
+          name: 'Shrutika',
+          initials: 'SH',
+        },
+        reporter: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+        },
+        subtasks: [
+          { id: 1, title: 'Google OAuth dialog', done: true },
+          { id: 2, title: 'Microsoft Azure AD chooser', done: true },
+        ],
+        attachments: [],
+        comments: [],
+        watchers: 3,
+        order: 0,
+      },
+      {
+        id: 'KAN-5',
+        listId: 'list_done',
+        key: 'KAN-5',
+        title: 'Initialize Workspace Hierarchy & Navigation',
+        description: 'Project spaces, sidebar navigation, and header controls completed.',
+        status: 'Done',
+        iconType: 'check',
+        dueDate: 'Oct 3, 2026',
+        startDate: 'Sep 25, 2026',
+        priority: 'Medium',
+        parent: 'Architecture',
+        team: 'Engineering',
+        labels: ['foundation'],
+        assignedTo: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+        },
+        reporter: {
+          name: 'Samarth Choudhary',
+          initials: 'SC',
+        },
+        subtasks: [{ id: 1, title: 'Sidebar and headers', done: true }],
+        attachments: [],
+        comments: [],
+        watchers: 1,
+        order: 0,
+      },
+    ];
+    await Card.insertMany(initialCards);
+
+    console.log('[Seed] Initial data successfully seeded into MongoDB.');
+  } catch (error) {
+    console.error('[Seed] Error seeding data:', error.message);
+  }
+};
