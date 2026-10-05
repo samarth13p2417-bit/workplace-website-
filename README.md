@@ -34,15 +34,17 @@ A modern, full-featured **workspace management platform** inspired by Jira and A
 
 ## 🛠️ Tech Stack
 
-| Category       | Technology                                                     |
-| -------------- | -------------------------------------------------------------- |
-| **Framework**  | [React 18](https://react.dev/)                                 |
-| **Build Tool** | [Vite 6](https://vitejs.dev/)                                  |
-| **Styling**    | [Tailwind CSS 3](https://tailwindcss.com/)                     |
-| **Drag & Drop**| [@hello-pangea/dnd](https://github.com/hello-pangea/dnd)       |
-| **Icons**      | [Lucide React](https://lucide.dev/)                            |
-| **Email**      | [EmailJS](https://www.emailjs.com/)                            |
-| **Language**   | JavaScript (ES Modules)                                        |
+| Category        | Technology                                                     |
+| --------------- | -------------------------------------------------------------- |
+| **Frontend**    | [React 18](https://react.dev/) + [Vite 6](https://vitejs.dev/) |
+| **Backend API** | [Node.js](https://nodejs.org/) + [Express.js 5](https://expressjs.com/) |
+| **Database**    | [MongoDB](https://www.mongodb.com/) + [Mongoose](https://mongoosejs.com/) |
+| **Auth**        | JWT (JSON Web Tokens) + [bcryptjs](https://github.com/dcodeIO/bcrypt.js) |
+| **Styling**     | [Tailwind CSS 3](https://tailwindcss.com/)                     |
+| **Drag & Drop** | [@hello-pangea/dnd](https://github.com/hello-pangea/dnd)       |
+| **Icons**       | [Lucide React](https://lucide.dev/)                            |
+| **Email**       | [EmailJS](https://www.emailjs.com/)                            |
+| **Language**    | JavaScript (ES Modules)                                        |
 
 ---
 
@@ -51,17 +53,49 @@ A modern, full-featured **workspace management platform** inspired by Jira and A
 ```
 workplace-website/
 ├── index.html                    # Entry HTML
-├── package.json                  # Dependencies & scripts
-├── vite.config.js                # Vite configuration
+├── package.json                  # Dependencies & fullstack scripts
+├── vite.config.js                # Vite configuration with /api proxy
 ├── tailwind.config.js            # Tailwind CSS configuration
 ├── postcss.config.js             # PostCSS configuration
+├── server/                       # Backend Express & MongoDB Application
+│   ├── server.js                 # Express server entry point & middleware
+│   ├── .env                      # Server environment variables
+│   ├── .env.example              # Environment variables template
+│   ├── config/
+│   │   └── db.js                 # Mongoose connection manager
+│   ├── models/
+│   │   ├── User.js               # User schema
+│   │   ├── Workspace.js          # Workspace schema with members
+│   │   ├── Board.js              # Kanban board schema
+│   │   ├── List.js               # Column/list schema
+│   │   └── Card.js               # Issue/card schema with subtasks & comments
+│   ├── controllers/
+│   │   ├── authController.js     # Auth logic & JWT generation
+│   │   ├── workspaceController.js# Workspace & team member operations
+│   │   ├── boardController.js    # Board data aggregation
+│   │   ├── listController.js     # Column CRUD operations
+│   │   └── cardController.js     # Task CRUD & drag-drop reordering
+│   ├── routes/
+│   │   ├── authRoutes.js         # /api/auth/*
+│   │   ├── workspaceRoutes.js    # /api/workspaces/*
+│   │   ├── boardRoutes.js        # /api/boards/*
+│   │   ├── listRoutes.js         # /api/lists/*
+│   │   └── cardRoutes.js         # /api/cards/*
+│   ├── middleware/
+│   │   ├── auth.js               # Bearer JWT route guard
+│   │   └── errorHandler.js       # Centralized error handler
+│   └── seed/
+│       └── seedData.js           # Auto-seed initial demo board & cards
 └── src/
     ├── main.jsx                  # React entry point
     ├── App.jsx                   # Root app with routing & auth
     ├── index.css                 # Global styles
     ├── emailjs.config.js         # EmailJS configuration
     ├── assets/                   # Static assets
-    ├── services/                 # API & service modules
+    ├── services/                 # API client services
+    │   ├── authApi.js            # Frontend auth service (calls /api/auth)
+    │   ├── kanbanApi.js          # Frontend kanban service (calls /api/*)
+    │   └── dataModels.js         # Entity schema definitions
     └── components/
         ├── AbcLandingPage.jsx          # Marketing landing page
         ├── AbcLogo.jsx                 # Brand logo component
@@ -83,12 +117,41 @@ workplace-website/
 
 ---
 
+## 📡 REST API Reference
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/health` | Backend and database health status |
+| `POST` | `/api/auth/register` | Register new user with hashed password |
+| `POST` | `/api/auth/login` | Authenticate user and return JWT |
+| `POST` | `/api/auth/login/social` | Authenticate or register OAuth user |
+| `GET` | `/api/auth/me` | Verify JWT and return current user profile |
+| `POST` | `/api/auth/logout` | Invalidate session |
+| `GET` | `/api/workspaces` | Get all workspaces |
+| `GET` | `/api/workspaces/:id` | Get specific workspace details |
+| `POST` | `/api/workspaces` | Create new workspace with default board |
+| `PUT` | `/api/workspaces/:id` | Update workspace settings |
+| `POST` | `/api/workspaces/:id/members` | Invite new workspace member |
+| `DELETE` | `/api/workspaces/:id/members/:memberId` | Remove workspace member |
+| `GET` | `/api/boards/:id/full` | Get full board data (workspace, board, lists, cards) |
+| `POST` | `/api/lists` | Create a new board column |
+| `PUT` | `/api/lists/:id` | Update column title or order |
+| `DELETE` | `/api/lists/:id` | Delete column and its cards |
+| `POST` | `/api/cards` | Create new task / issue card |
+| `GET` | `/api/cards/:id` | Get card details |
+| `PUT` | `/api/cards/:id` | Update card fields (priority, labels, status) |
+| `DELETE` | `/api/cards/:id` | Delete card |
+| `POST` | `/api/cards/reorder` | Drag-and-drop move card across or within lists |
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18 or higher recommended)
-- [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
+- [MongoDB](https://www.mongodb.com/) (running locally or MongoDB Atlas connection string)
+- [npm](https://www.npmjs.com/)
 
 ### Installation
 
@@ -103,13 +166,16 @@ workplace-website/
    npm install
    ```
 
-3. **Start the development server**
+3. **Start Fullstack Application (Backend + Frontend)**
    ```bash
    npm run dev
    ```
+   - **Backend API**: `http://localhost:5000`
+   - **Frontend App**: `http://localhost:5173`
 
-4. **Open in browser**
-   Navigate to `http://localhost:5173` (default Vite port)
+   *Or run them in separate terminals:*
+   - Backend only: `npm run server`
+   - Frontend only: `npm run client`
 
 ### Build for Production
 

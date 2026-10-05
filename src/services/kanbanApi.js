@@ -1,7 +1,7 @@
 /**
- * Week 2: Day 1-3 - REST APIs for Lists and Cards CRUD Operations
- * Client-side REST Service with LocalStorage persistence and asynchronous promises.
- * Includes optimistic update snapshotting and rollback support (Week 2: Day 7).
+ * REST APIs for Workspaces, Boards, Lists, and Cards CRUD Operations
+ * Connects to Node.js / Express backend with MongoDB persistence.
+ * Includes local store synchronization for seamless offline and optimistic updates.
  */
 
 import {
@@ -11,16 +11,15 @@ import {
   INITIAL_CARDS,
   INITIAL_USER,
 } from './dataModels';
+import { emitCardUpdate } from './socket';
 
 const DB_KEY = 'jira_kanban_store_v1';
 
-// Helper to get database from storage or initialize
+// Get local cache
 const getStore = () => {
   try {
     const raw = localStorage.getItem(DB_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
+    if (raw) return JSON.parse(raw);
   } catch (e) {
     console.error('Failed to parse localStorage store:', e);
   }
@@ -36,7 +35,6 @@ const getStore = () => {
   return initialStore;
 };
 
-// Helper to save store
 const saveStore = (store) => {
   try {
     localStorage.setItem(DB_KEY, JSON.stringify(store));
@@ -45,31 +43,47 @@ const saveStore = (store) => {
   }
 };
 
-// Artificial network delay simulator
-const delay = (ms = 180) => new Promise((resolve) => setTimeout(resolve, ms));
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('jira_auth_token_v1');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 export const kanbanApi = {
   /**
    * Reset store to initial seed data
    */
   async resetDatabase() {
-    await delay(100);
     localStorage.removeItem(DB_KEY);
     return getStore();
   },
 
   // =========================================================================
-  // WORKSPACE CRUD (Week 1: Day 3-5)
+  // WORKSPACE CRUD
   // =========================================================================
 
-  /**
-   * POST /api/workspaces
-   * Create a new workspace
-   */
   async createWorkspace({ name, key, category, type, description, ownerId }) {
-    await delay(200);
-    const store = getStore();
+    try {
+      const res = await fetch('/api/workspaces', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name, key, category, type, description, ownerId }),
+      });
+      if (res.ok) {
+        const workspace = await res.json();
+        const store = getStore();
+        store.workspace = workspace;
+        saveStore(store);
+        return workspace;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable, using local fallback:', e.message);
+    }
 
+    // Local fallback
+    const store = getStore();
     const newWorkspace = {
       id: `ws_${Date.now()}`,
       name: name.trim(),
@@ -92,42 +106,60 @@ export const kanbanApi = {
         },
       ],
     };
-
-    // Update the active workspace in the store
     store.workspace = newWorkspace;
     saveStore(store);
     return newWorkspace;
   },
 
-  /**
-   * GET /api/workspaces
-   * List all workspaces (returns the current workspace for client-side simulation)
-   */
   async getWorkspaces() {
-    await delay(100);
+    try {
+      const res = await fetch('/api/workspaces', { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) return data;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for getWorkspaces:', e.message);
+    }
     const store = getStore();
     return [store.workspace];
   },
 
-  /**
-   * GET /api/workspaces/:id
-   * Fetch a single workspace by ID
-   */
   async getWorkspace(workspaceId) {
-    await delay(80);
-    const store = getStore();
-    if (store.workspace.id === workspaceId || !workspaceId) {
-      return store.workspace;
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for getWorkspace:', e.message);
     }
-    throw new Error(`Workspace not found: ${workspaceId}`);
+    const store = getStore();
+    return store.workspace;
   },
 
-  /**
-   * GET /api/boards/:id/full
-   * Fetches the board, its ordered lists, and populated cards
-   */
+  // =========================================================================
+  // BOARDS & FULL BOARD DATA
+  // =========================================================================
+
   async getBoardData(boardId = 'board_kanban_1') {
-    await delay(120);
+    try {
+      const res = await fetch(`/api/boards/${boardId}/full`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        // Update local cache
+        const store = getStore();
+        store.workspace = data.workspace || store.workspace;
+        store.board = data.board || store.board;
+        store.lists = data.lists || store.lists;
+        store.cards = data.cards || store.cards;
+        saveStore(store);
+        return data;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for getBoardData, loading local cache:', e.message);
+    }
+
     const store = getStore();
     return {
       workspace: store.workspace,
@@ -141,58 +173,91 @@ export const kanbanApi = {
   // LISTS CRUD (Columns)
   // =========================================================================
 
-  /**
-   * POST /api/lists
-   * Create a new column/list
-   */
   async createList(title) {
-    await delay(150);
+    try {
+      const res = await fetch('/api/lists', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ title }),
+      });
+      if (res.ok) {
+        const newList = await res.json();
+        const store = getStore();
+        store.lists.push(newList);
+        saveStore(store);
+        return newList;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for createList:', e.message);
+    }
+
     const store = getStore();
-    const newListId = `list_${Date.now()}`;
     const newList = {
-      id: newListId,
+      id: `list_${Date.now()}`,
       boardId: store.board.id,
       title: title.trim(),
       order: store.lists.length,
       cardIds: [],
     };
-
     store.lists.push(newList);
     saveStore(store);
     return newList;
   },
 
-  /**
-   * PUT /api/lists/:id
-   * Update column title or order
-   */
   async updateList(listId, updates) {
-    await delay(120);
-    const store = getStore();
-    const index = store.lists.findIndex((l) => l.id === listId);
-    if (index === -1) throw new Error(`List not found: ${listId}`);
+    try {
+      const res = await fetch(`/api/lists/${listId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        const store = getStore();
+        const idx = store.lists.findIndex((l) => l.id === listId);
+        if (idx !== -1) store.lists[idx] = updated;
+        saveStore(store);
+        return updated;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for updateList:', e.message);
+    }
 
-    store.lists[index] = { ...store.lists[index], ...updates };
-    saveStore(store);
-    return store.lists[index];
+    const store = getStore();
+    const idx = store.lists.findIndex((l) => l.id === listId);
+    if (idx !== -1) {
+      store.lists[idx] = { ...store.lists[idx], ...updates };
+      saveStore(store);
+      return store.lists[idx];
+    }
+    return updates;
   },
 
-  /**
-   * DELETE /api/lists/:id
-   * Delete column and its cards
-   */
   async deleteList(listId) {
-    await delay(150);
+    try {
+      const res = await fetch(`/api/lists/${listId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const store = getStore();
+        const target = store.lists.find((l) => l.id === listId);
+        if (target) {
+          target.cardIds.forEach((cid) => delete store.cards[cid]);
+        }
+        store.lists = store.lists.filter((l) => l.id !== listId);
+        saveStore(store);
+        return { success: true, deletedListId: listId };
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for deleteList:', e.message);
+    }
+
     const store = getStore();
-    const targetList = store.lists.find((l) => l.id === listId);
-    if (!targetList) throw new Error(`List not found: ${listId}`);
-
-    // Remove cards belonging to this list
-    targetList.cardIds.forEach((cardId) => {
-      delete store.cards[cardId];
-    });
-
-    // Remove the list
+    const target = store.lists.find((l) => l.id === listId);
+    if (target) {
+      target.cardIds.forEach((cid) => delete store.cards[cid]);
+    }
     store.lists = store.lists.filter((l) => l.id !== listId);
     saveStore(store);
     return { success: true, deletedListId: listId };
@@ -202,19 +267,34 @@ export const kanbanApi = {
   // CARDS CRUD (Issues / Tasks)
   // =========================================================================
 
-  /**
-   * POST /api/cards
-   * Create a new card in a list
-   */
   async createCard(listId, cardInput) {
-    await delay(150);
+    try {
+      const res = await fetch('/api/cards', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ listId, ...cardInput }),
+      });
+      if (res.ok) {
+        const createdCard = await res.json();
+        const store = getStore();
+        store.cards[createdCard.id] = createdCard;
+        const list = store.lists.find((l) => l.id === listId);
+        if (list && !list.cardIds.includes(createdCard.id)) {
+          list.cardIds.push(createdCard.id);
+        }
+        saveStore(store);
+        return createdCard;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for createCard:', e.message);
+    }
+
+    // Local fallback
     const store = getStore();
     const listIndex = store.lists.findIndex((l) => l.id === listId);
-    if (listIndex === -1) throw new Error(`List not found: ${listId}`);
-
     const nextNumber = Object.keys(store.cards).length + 1;
     const cardId = `KAN-${nextNumber}`;
-    const targetList = store.lists[listIndex];
+    const targetList = listIndex !== -1 ? store.lists[listIndex] : { title: 'To Do', cardIds: [] };
 
     const newCard = {
       id: cardId,
@@ -244,72 +324,92 @@ export const kanbanApi = {
     };
 
     store.cards[cardId] = newCard;
-    targetList.cardIds.push(cardId);
+    if (listIndex !== -1) store.lists[listIndex].cardIds.push(cardId);
     saveStore(store);
-
     return newCard;
   },
 
-  /**
-   * GET /api/cards/:id
-   * Fetch single card details
-   */
   async getCard(cardId) {
-    await delay(80);
+    try {
+      const res = await fetch(`/api/cards/${cardId}`, { headers: getAuthHeaders() });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for getCard:', e.message);
+    }
     const store = getStore();
-    const card = store.cards[cardId];
-    if (!card) throw new Error(`Card not found: ${cardId}`);
-    return card;
-  },
-
-  /**
-   * PUT /api/cards/:id
-   * Update card details (title, description, status, priority, etc.)
-   */
-  async updateCard(cardId, updates) {
-    await delay(120);
-    const store = getStore();
-    if (!store.cards[cardId]) throw new Error(`Card not found: ${cardId}`);
-
-    store.cards[cardId] = {
-      ...store.cards[cardId],
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-
-    saveStore(store);
     return store.cards[cardId];
   },
 
-  /**
-   * DELETE /api/cards/:id
-   * Delete card
-   */
-  async deleteCard(cardId) {
-    await delay(120);
-    const store = getStore();
-    const card = store.cards[cardId];
-    if (!card) throw new Error(`Card not found: ${cardId}`);
-
-    // Remove from its list's cardIds
-    const list = store.lists.find((l) => l.id === card.listId);
-    if (list) {
-      list.cardIds = list.cardIds.filter((id) => id !== cardId);
+  async updateCard(cardId, updates) {
+    try {
+      const res = await fetch(`/api/cards/${cardId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        const store = getStore();
+        store.cards[cardId] = updated;
+        saveStore(store);
+        emitCardUpdate(updated);
+        return updated;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for updateCard:', e.message);
     }
 
+    const store = getStore();
+    if (store.cards[cardId]) {
+      store.cards[cardId] = {
+        ...store.cards[cardId],
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      };
+      saveStore(store);
+      return store.cards[cardId];
+    }
+    return updates;
+  },
+
+  async deleteCard(cardId) {
+    try {
+      const res = await fetch(`/api/cards/${cardId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const store = getStore();
+        const card = store.cards[cardId];
+        if (card) {
+          const list = store.lists.find((l) => l.id === card.listId);
+          if (list) list.cardIds = list.cardIds.filter((id) => id !== cardId);
+        }
+        delete store.cards[cardId];
+        saveStore(store);
+        return { success: true, deletedCardId: cardId };
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for deleteCard:', e.message);
+    }
+
+    const store = getStore();
+    const card = store.cards[cardId];
+    if (card) {
+      const list = store.lists.find((l) => l.id === card.listId);
+      if (list) list.cardIds = list.cardIds.filter((id) => id !== cardId);
+    }
     delete store.cards[cardId];
     saveStore(store);
     return { success: true, deletedCardId: cardId };
   },
 
   // =========================================================================
-  // DRAG & DROP REORDER (Week 2: Day 4-6)
+  // DRAG & DROP REORDER
   // =========================================================================
 
-  /**
-   * POST /api/cards/reorder
-   * Move card within same list or across lists
-   */
   async moveCard({
     cardId,
     sourceListId,
@@ -317,103 +417,131 @@ export const kanbanApi = {
     sourceIndex,
     destinationIndex,
   }) {
-    await delay(100);
+    try {
+      const res = await fetch('/api/cards/reorder', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          cardId,
+          sourceListId,
+          destinationListId,
+          sourceIndex,
+          destinationIndex,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const store = getStore();
+        if (store.cards[cardId]) {
+          store.cards[cardId].listId = destinationListId;
+          store.cards[cardId].status = data.destinationList?.title || store.cards[cardId].status;
+        }
+        saveStore(store);
+        return data;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for moveCard:', e.message);
+    }
+
+    // Local fallback
     const store = getStore();
     const card = store.cards[cardId];
-    if (!card) throw new Error(`Card not found: ${cardId}`);
-
     const sourceList = store.lists.find((l) => l.id === sourceListId);
     const destinationList = store.lists.find((l) => l.id === destinationListId);
 
-    if (!sourceList || !destinationList) {
-      throw new Error('Source or destination list not found');
+    if (sourceList && destinationList && card) {
+      sourceList.cardIds.splice(sourceIndex, 1);
+      destinationList.cardIds.splice(destinationIndex, 0, cardId);
+      card.listId = destinationListId;
+      card.status = destinationList.title;
+      saveStore(store);
     }
 
-    // Remove from source list
-    sourceList.cardIds.splice(sourceIndex, 1);
-
-    // Insert into destination list
-    destinationList.cardIds.splice(destinationIndex, 0, cardId);
-
-    // Update card's listId and status
-    card.listId = destinationListId;
-    card.status = destinationList.title;
-
-    saveStore(store);
-
-    return {
-      success: true,
-      card,
-      sourceList,
-      destinationList,
-    };
+    return { success: true, card, sourceList, destinationList };
   },
 
   // =========================================================================
-  // WORKSPACE SETTINGS & MEMBERS (Week 1: Day 3-5, 6-7)
+  // WORKSPACE SETTINGS & MEMBERS
   // =========================================================================
 
-  /**
-   * PUT /api/workspaces/:id
-   * Update workspace settings
-   */
   async updateWorkspace(workspaceId, updates) {
-    await delay(150);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        const store = getStore();
+        store.workspace = { ...store.workspace, ...updated };
+        saveStore(store);
+        return updated;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for updateWorkspace:', e.message);
+    }
+
     const store = getStore();
     store.workspace = { ...store.workspace, ...updates };
     saveStore(store);
     return store.workspace;
   },
 
-  /**
-   * POST /api/workspaces/:id/members
-   * Invite new workspace member
-   */
   async inviteMember(workspaceId, { email, role = 'Member' }) {
-    await delay(200);
-    const store = getStore();
-    const existing = store.workspace.members.find(
-      (m) => m.email.toLowerCase() === email.toLowerCase()
-    );
-    if (existing) {
-      throw new Error(`Member with email ${email} is already in this workspace.`);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ email, role }),
+      });
+      if (res.ok) {
+        const newMember = await res.json();
+        const store = getStore();
+        store.workspace.members.push(newMember);
+        saveStore(store);
+        return newMember;
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for inviteMember:', e.message);
     }
 
+    // Local fallback
+    const store = getStore();
     const name = email.split('@')[0].replace(/[._]/g, ' ');
-    const initials = name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .substring(0, 2)
-      .toUpperCase();
-
     const newMember = {
       id: `mem_${Date.now()}`,
       name: name.charAt(0).toUpperCase() + name.slice(1),
       email: email.trim(),
       role,
-      initials: initials || 'US',
-      avatarColor: ['#0052CC', '#36B37E', '#FF8B00', '#6554C0', '#00C7E6'][
-        store.workspace.members.length % 5
-      ],
+      initials: name.substring(0, 2).toUpperCase() || 'US',
+      avatarColor: ['#0052CC', '#36B37E', '#FF8B00', '#6554C0'][store.workspace.members.length % 4],
       status: 'Active',
       joinedAt: new Date().toISOString(),
     };
-
     store.workspace.members.push(newMember);
     saveStore(store);
     return newMember;
   },
 
-  /**
-   * DELETE /api/workspaces/:id/members/:memberId
-   */
   async removeMember(workspaceId, memberId) {
-    await delay(150);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const store = getStore();
+        store.workspace.members = store.workspace.members.filter((m) => m.id !== memberId);
+        saveStore(store);
+        return { success: true, removedMemberId: memberId };
+      }
+    } catch (e) {
+      console.warn('[kanbanApi] Backend unavailable for removeMember:', e.message);
+    }
+
     const store = getStore();
-    store.workspace.members = store.workspace.members.filter(
-      (m) => m.id !== memberId
-    );
+    store.workspace.members = store.workspace.members.filter((m) => m.id !== memberId);
     saveStore(store);
     return { success: true, removedMemberId: memberId };
   },

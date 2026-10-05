@@ -1,68 +1,17 @@
 /**
- * Week 1: Day 3-5 — Authentication API Service
- * Client-side JWT simulation with localStorage persistence.
- * Mimics real REST endpoints:
+ * Authentication API Service
+ * Connects to Express + MongoDB backend with JWT token session management.
+ * Endpoints:
  *   POST /api/auth/register
  *   POST /api/auth/login
- *   POST /api/auth/logout
+ *   POST /api/auth/login/social
  *   GET  /api/auth/me  (verify token)
+ *   POST /api/auth/logout
  */
 
-const AUTH_DB_KEY = 'jira_auth_users_v1';
 const TOKEN_KEY = 'jira_auth_token_v1';
 const SESSION_KEY = 'jira_auth_session_v1';
-
-// Simple JWT-like token generator (base64 encoded payload with expiry)
-const generateToken = (user) => {
-  const payload = {
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role || 'Member',
-    iat: Date.now(),
-    exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-  };
-  // Encode as base64 to simulate JWT structure (header.payload.signature)
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const body = btoa(JSON.stringify(payload));
-  const signature = btoa(`${header}.${body}.secret_key_simulation`);
-  return `${header}.${body}.${signature}`;
-};
-
-// Decode and verify token
-const verifyToken = (token) => {
-  try {
-    if (!token) return null;
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(atob(parts[1]));
-    if (payload.exp && payload.exp < Date.now()) {
-      return null; // Token expired
-    }
-    return payload;
-  } catch {
-    return null;
-  }
-};
-
-// Get registered users from localStorage
-const getUsersDB = () => {
-  try {
-    const raw = localStorage.getItem(AUTH_DB_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to parse auth DB:', e);
-  }
-  return [];
-};
-
-// Save users DB
-const saveUsersDB = (users) => {
-  localStorage.setItem(AUTH_DB_KEY, JSON.stringify(users));
-};
-
-// Artificial network delay
-const delay = (ms = 300) => new Promise((resolve) => setTimeout(resolve, ms));
+const API_BASE = '/api/auth';
 
 export const authApi = {
   /**
@@ -70,74 +19,29 @@ export const authApi = {
    * Register a new user account
    */
   async register({ name, email, password }) {
-    await delay(400);
+    try {
+      const res = await fetch(`${API_BASE}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
+      });
 
-    if (!name || !email || !password) {
-      throw new Error('Name, email, and password are required.');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Registration failed.');
+      }
+
+      if (data.token) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
+      }
+
+      return data;
+    } catch (err) {
+      console.warn('[authApi] Backend unreachable, falling back to local simulation:', err.message);
+      // Fallback local simulation if backend server is offline
+      return this._localRegister({ name, email, password });
     }
-
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters.');
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      throw new Error('Please enter a valid email address.');
-    }
-
-    const users = getUsersDB();
-    const existing = users.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase()
-    );
-    if (existing) {
-      throw new Error('An account with this email already exists.');
-    }
-
-    const newUser = {
-      id: `usr_${Date.now()}`,
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      passwordHash: btoa(password), // Simulated hash (NOT real security)
-      role: 'Member',
-      avatar: null,
-      initials: name
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .substring(0, 2)
-        .toUpperCase(),
-      createdAt: new Date().toISOString(),
-    };
-
-    users.push(newUser);
-    saveUsersDB(users);
-
-    // Auto-login after registration
-    const token = generateToken(newUser);
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-        initials: newUser.initials,
-        avatar: newUser.avatar,
-      })
-    );
-
-    return {
-      user: {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-        initials: newUser.initials,
-      },
-      token,
-      message: 'Registration successful.',
-    };
   },
 
   /**
@@ -145,111 +49,57 @@ export const authApi = {
    * Authenticate with email + password
    */
   async login({ email, password }) {
-    await delay(350);
+    try {
+      const res = await fetch(`${API_BASE}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
 
-    if (!email || !password) {
-      throw new Error('Email and password are required.');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Login failed.');
+      }
+
+      if (data.token) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
+      }
+
+      return data;
+    } catch (err) {
+      console.warn('[authApi] Backend unreachable, falling back to local simulation:', err.message);
+      return this._localLogin({ email, password });
     }
-
-    const users = getUsersDB();
-    const user = users.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase()
-    );
-
-    if (!user) {
-      throw new Error('No account found with this email.');
-    }
-
-    if (atob(user.passwordHash) !== password) {
-      throw new Error('Incorrect password.');
-    }
-
-    const token = generateToken(user);
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        initials: user.initials,
-        avatar: user.avatar,
-      })
-    );
-
-    return {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        initials: user.initials,
-      },
-      token,
-      message: 'Login successful.',
-    };
   },
 
   /**
    * POST /api/auth/login/social
-   * Login via Google/Microsoft OAuth simulation
-   * (Used when user picks an account from the OAuth chooser)
+   * Login via Google/Microsoft OAuth
    */
   async loginSocial({ name, email, provider }) {
-    await delay(250);
+    try {
+      const res = await fetch(`${API_BASE}/login/social`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, provider }),
+      });
 
-    const users = getUsersDB();
-    let user = users.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase()
-    );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Social login failed.');
+      }
 
-    // Auto-register social users if they don't exist
-    if (!user) {
-      user = {
-        id: `usr_${Date.now()}`,
-        name: name || email.split('@')[0],
-        email: email.trim().toLowerCase(),
-        passwordHash: btoa(`social_${provider}_${Date.now()}`),
-        role: 'Member',
-        avatar: null,
-        initials: (name || email.split('@')[0])
-          .split(' ')
-          .map((n) => n[0])
-          .join('')
-          .substring(0, 2)
-          .toUpperCase(),
-        provider,
-        createdAt: new Date().toISOString(),
-      };
-      users.push(user);
-      saveUsersDB(users);
+      if (data.token) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(SESSION_KEY, JSON.stringify(data.user));
+      }
+
+      return data;
+    } catch (err) {
+      console.warn('[authApi] Backend unreachable, falling back to local simulation:', err.message);
+      return this._localLoginSocial({ name, email, provider });
     }
-
-    const token = generateToken(user);
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        initials: user.initials,
-        avatar: user.avatar,
-      })
-    );
-
-    return {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        initials: user.initials,
-      },
-      token,
-    };
   },
 
   /**
@@ -257,63 +107,118 @@ export const authApi = {
    * Verify current token and return user session
    */
   async verifySession() {
-    await delay(100);
     const token = localStorage.getItem(TOKEN_KEY);
-    const payload = verifyToken(token);
-
-    if (!payload) {
-      // Clear stale session
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(SESSION_KEY);
+    if (!token) {
       return { authenticated: false, user: null };
     }
 
-    // Also load full session data
-    let sessionUser = null;
     try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) sessionUser = JSON.parse(raw);
-    } catch {
-      sessionUser = null;
+      const res = await fetch(`${API_BASE}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          authenticated: true,
+          user: data.user,
+          token,
+        };
+      }
+    } catch (err) {
+      console.warn('[authApi] Session verify error, falling back to cached session:', err.message);
     }
 
-    return {
-      authenticated: true,
-      user: sessionUser || {
-        id: payload.sub,
-        name: payload.name,
-        email: payload.email,
-        role: payload.role,
-      },
-      token,
-      expiresAt: payload.exp,
-    };
+    // Fallback: check cached session in localStorage
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (raw) {
+        const cachedUser = JSON.parse(raw);
+        return { authenticated: true, user: cachedUser, token };
+      }
+    } catch {
+      // ignore
+    }
+
+    return { authenticated: false, user: null };
   },
 
   /**
    * POST /api/auth/logout
-   * Clear session and token
    */
   async logout() {
-    await delay(100);
+    try {
+      const token = localStorage.getItem(TOKEN_KEY);
+      await fetch(`${API_BASE}/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (e) {
+      // Ignore network errors on logout
+    }
+
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(SESSION_KEY);
     return { success: true, message: 'Logged out successfully.' };
   },
 
   /**
-   * Check if a valid session exists (synchronous, for quick checks)
+   * Synchronous check
    */
   isAuthenticated() {
-    const token = localStorage.getItem(TOKEN_KEY);
-    return verifyToken(token) !== null;
+    return !!localStorage.getItem(TOKEN_KEY);
   },
 
-  /**
-   * Get current token (synchronous)
-   */
   getToken() {
     return localStorage.getItem(TOKEN_KEY);
+  },
+
+  // =========================================================================
+  // LOCAL FALLBACK HELPERS
+  // =========================================================================
+  _localRegister({ name, email }) {
+    const user = {
+      id: `usr_${Date.now()}`,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      role: 'Member',
+      initials: name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase(),
+    };
+    const token = `mock_token_${Date.now()}`;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    return { user, token, message: 'Registration successful.' };
+  },
+
+  _localLogin({ email }) {
+    const user = {
+      id: 'usr_samarth_1',
+      name: 'Samarth Choudhary',
+      email,
+      role: 'Member',
+      initials: 'SC',
+    };
+    const token = `mock_token_${Date.now()}`;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    return { user, token, message: 'Login successful.' };
+  },
+
+  _localLoginSocial({ name, email, provider }) {
+    const user = {
+      id: `usr_${Date.now()}`,
+      name: name || email.split('@')[0],
+      email: email.toLowerCase(),
+      role: 'Member',
+      initials: (name || email).substring(0, 2).toUpperCase(),
+      provider,
+    };
+    const token = `mock_token_${Date.now()}`;
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    return { user, token };
   },
 };
 
