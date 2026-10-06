@@ -16,9 +16,17 @@ import {
   Trash2,
   Edit2,
   RefreshCw,
-  X
+  X,
+  Radio
 } from 'lucide-react';
 import kanbanApi from '../services/kanbanApi';
+import {
+  joinBoard,
+  getSocket,
+  emitCardMove,
+  emitCardCreate,
+  emitCardDelete,
+} from '../services/socket';
 
 export const KanbanBoardEngine = ({
   workspace,
@@ -40,6 +48,7 @@ export const KanbanBoardEngine = ({
 
   // Week 2: Day 7 - Optimistic State & Sync Status
   const [syncStatus, setSyncStatus] = useState('synced'); // 'synced', 'saving', 'error'
+  const [activeSocketUsers, setActiveSocketUsers] = useState([]);
   const stateSnapshotRef = useRef({ lists: [], cards: {} });
 
   const userInitials = user?.initials || (user?.name
@@ -51,9 +60,97 @@ export const KanbanBoardEngine = ({
         .toUpperCase()
     : 'SC');
 
-  // Load initial board data from API
+  // Load initial board data from API & join real-time Socket.io room
   useEffect(() => {
     loadBoardData();
+
+    // Connect to real-time engine with secure WebSocket JWT handshake
+    joinBoard('board_kanban_1');
+    const socket = getSocket();
+
+    const handleActiveUsers = (users) => {
+      setActiveSocketUsers(users || []);
+    };
+
+    const handleRemoteCardMoved = (data) => {
+      const { cardId, sourceListId, destinationListId, sourceIndex, destinationIndex } = data;
+      setLists((prevLists) => {
+        const sourceList = prevLists.find((l) => l.id === sourceListId);
+        const destList = prevLists.find((l) => l.id === destinationListId);
+        if (!sourceList || !destList) return prevLists;
+
+        let next = [...prevLists];
+        if (sourceListId === destinationListId) {
+          const newCardIds = Array.from(sourceList.cardIds);
+          newCardIds.splice(sourceIndex, 1);
+          newCardIds.splice(destinationIndex, 0, cardId);
+          return next.map((l) => (l.id === sourceListId ? { ...l, cardIds: newCardIds } : l));
+        } else {
+          const sourceCardIds = Array.from(sourceList.cardIds).filter((id) => id !== cardId);
+          const destCardIds = Array.from(destList.cardIds);
+          destCardIds.splice(destinationIndex, 0, cardId);
+          return next.map((l) => {
+            if (l.id === sourceListId) return { ...l, cardIds: sourceCardIds };
+            if (l.id === destinationListId) return { ...l, cardIds: destCardIds };
+            return l;
+          });
+        }
+      });
+
+      setCards((prev) => {
+        if (!prev[cardId]) return prev;
+        return {
+          ...prev,
+          [cardId]: {
+            ...prev[cardId],
+            listId: destinationListId,
+          },
+        };
+      });
+    };
+
+    const handleRemoteCardCreated = (newCard) => {
+      setCards((prev) => ({ ...prev, [newCard.id]: newCard }));
+      setLists((prev) =>
+        prev.map((l) =>
+          l.id === newCard.listId && !l.cardIds.includes(newCard.id)
+            ? { ...l, cardIds: [...l.cardIds, newCard.id] }
+            : l
+        )
+      );
+    };
+
+    const handleRemoteCardUpdated = (updatedCard) => {
+      setCards((prev) => ({ ...prev, [updatedCard.id]: updatedCard }));
+    };
+
+    const handleRemoteCardDeleted = (deletedCardId) => {
+      setCards((prev) => {
+        const copy = { ...prev };
+        delete copy[deletedCardId];
+        return copy;
+      });
+      setLists((prev) =>
+        prev.map((l) => ({
+          ...l,
+          cardIds: l.cardIds.filter((id) => id !== deletedCardId),
+        }))
+      );
+    };
+
+    socket.on('board:active_users', handleActiveUsers);
+    socket.on('card:moved', handleRemoteCardMoved);
+    socket.on('card:created', handleRemoteCardCreated);
+    socket.on('card:updated', handleRemoteCardUpdated);
+    socket.on('card:deleted', handleRemoteCardDeleted);
+
+    return () => {
+      socket.off('board:active_users', handleActiveUsers);
+      socket.off('card:moved', handleRemoteCardMoved);
+      socket.off('card:created', handleRemoteCardCreated);
+      socket.off('card:updated', handleRemoteCardUpdated);
+      socket.off('card:deleted', handleRemoteCardDeleted);
+    };
   }, []);
 
   const loadBoardData = async () => {
@@ -159,6 +256,15 @@ export const KanbanBoardEngine = ({
         destinationIndex: destination.index,
       });
 
+      // Broadcast real-time move event via Socket.io
+      emitCardMove({
+        cardId: draggableId,
+        sourceListId: source.droppableId,
+        destinationListId: destination.droppableId,
+        sourceIndex: source.index,
+        destinationIndex: destination.index,
+      });
+
       setSyncStatus('synced');
     } catch (err) {
       console.error('Drag and drop move failed on server:', err);
@@ -197,6 +303,7 @@ export const KanbanBoardEngine = ({
       );
 
       setSyncStatus('synced');
+      emitCardCreate(createdCard);
       if (showNotification) showNotification(`Created ${createdCard.id}: ${tempTitle}`);
     } catch (err) {
       console.error('Card creation failed:', err);
@@ -211,6 +318,7 @@ export const KanbanBoardEngine = ({
 
     try {
       await kanbanApi.deleteCard(cardId);
+      emitCardDelete(cardId);
       setCards((prev) => {
         const copy = { ...prev };
         delete copy[cardId];
@@ -333,6 +441,17 @@ export const KanbanBoardEngine = ({
 
         {/* Right Controls: Sync State Indicator + Add Column Button */}
         <div className="flex items-center gap-3">
+          {/* Real-time Socket.io & Redis Active Connection Badge */}
+          <div
+            className="flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded border border-[#DFE1E6] bg-white shadow-xs"
+            title="Real-time Socket.io synchronization with secure WebSocket JWT handshake"
+          >
+            <Radio className="w-3 h-3 text-[#0052CC] animate-pulse" />
+            <span className="text-[#0052CC] font-semibold">
+              Live: {Math.max(1, activeSocketUsers.length)} active
+            </span>
+          </div>
+
           {/* Week 2: Day 7 - Optimistic Sync Status Badge */}
           <div className="flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded border border-[#DFE1E6] bg-white shadow-xs">
             {syncStatus === 'synced' && (
